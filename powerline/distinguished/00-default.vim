@@ -40,8 +40,8 @@ call Pl#Statusline(
 		\ Pl#Segment("%{Stl_GetSyntaxErrors('$line')}",
 			\ exists('g:loaded_syntastic_plugin') && g:loaded_syntastic_plugin == 1,
 			\
-			\ Pl#HiCurrent(   Pl#FG(214), Pl#Attr('bold')),
-			\ Pl#HiInsert(    Pl#FG(214), Pl#Attr('bold')),
+			\ Pl#HiCurrent(   Pl#FG(231), Pl#BG(124), Pl#Attr('bold')),
+			\ Pl#HiInsert(    Pl#FG(231), Pl#BG(31), Pl#Attr('bold'))
 			\ )
 		\ ),
 	\
@@ -55,7 +55,7 @@ call Pl#Statusline(
 	\ Pl#Split(
 		\ Pl#HiCurrent(   Pl#BG(236)),
 		\ Pl#HiInsert(    Pl#BG( 24)),
-		\ Pl#HiNonCurrent(Pl#BG(233))
+		\ Pl#HiNonCurrent(Pl#BG(234))
 		\ ),
 	\
 	\ Pl#Segment("%{&fileformat} %{(&fenc == '' ? &enc : &fenc)} ",
