@@ -36,22 +36,28 @@
 
 	let s:EMPTY = ['', 0]
 	let s:HI_FALLBACK = { 'cterm': 0, 'gui': 0x000000 }
+	let s:MODES = { 'current': '', 'insert': '', 'noncurrent': '' }
 
 	let s:LEFT_SIDE = 0
 	let s:RIGHT_SIDE = 2
 
 	let s:HARD_DIVIDER = 0
 	let s:SOFT_DIVIDER = 1
+
+	" Cache revision, this must be incremented whenever the cache format is changed
+	let s:CACHE_REVISION = 1
 " }}}
 " Script variables {{{
 	let s:hi_groups = {}
 	let s:hi_current_group = {}
 	let s:hi_cmds = []
-	let s:statuslines = []
+
+	let s:match_statuslines = []
+	let s:stored_statuslines = {}
 " }}}
 " Statusline functions {{{
 	function! Pl#Statusline(...) " {{{
-		let modes = { 'current': '', 'insert': '', 'noncurrent': '' }
+		let modes = copy(s:MODES)
 
 		for mode in keys(modes)
 			let matches = []
@@ -61,10 +67,23 @@
 			let modes[mode] = segment
 		endfor
 
-		call add(s:statuslines, {
+		call add(s:match_statuslines, {
 			\ 'matches': matches,
 			\ 'modes': modes
 		\ })
+	endfunction " }}}
+	function! Pl#StoreStatusline(key, ...) " {{{
+		let modes = copy(s:MODES)
+
+		for mode in keys(modes)
+			let matches = []
+
+			let [segment, hi_curr, matches] = s:GroupHandler(mode, a:000, s:LEFT_SIDE, [])
+
+			let modes[mode] = segment
+		endfor
+
+		let s:stored_statuslines[a:key] = modes
 	endfunction " }}}
 	function! Pl#Match(expr, re) " {{{
 		return ['match', a:expr, a:re]
@@ -141,7 +160,7 @@
 			let gui = Pl#Colors#cterm2gui(a:cterm)
 		endif
 
-		let color = { 'cterm': a:cterm, 'gui': gui }
+		let color = { 'cterm': toupper(a:cterm), 'gui': toupper(gui) }
 
 		return ['fg', color]
 	endfunction " }}}
@@ -152,7 +171,7 @@
 			let gui = Pl#Colors#cterm2gui(a:cterm)
 		endif
 
-		let color = { 'cterm': a:cterm, 'gui': gui }
+		let color = { 'cterm': toupper(a:cterm), 'gui': toupper(gui) }
 
 		return ['bg', color]
 	endfunction " }}}
@@ -188,6 +207,7 @@
 		let matches = a:matches
 
 		let hi_group = 'hi_'. a:type
+		let hi_curr = {}
 
 		" Remove empty and invalid segments from argument array
 		for i in range(0, len(a:args) - 1)
@@ -302,6 +322,11 @@
 			let ret .= segment
 		endfor
 
+		" Return an empty statusline if we're missing all highlighting for this mode
+		if empty(hi_curr)
+			let ret = ''
+		endif
+
 		return [ret, hi_curr, matches]
 	endfunction " }}}
 	function! s:GetHi(type, args) " {{{
@@ -342,25 +367,26 @@
 		let bg   = a:hi['bg']
 		let attr = a:hi['attr']
 
-		" Calculate checksum for this highlighting group
-		" We do this to get a safe and shorter but still unique group name
-		let hi_group = printf('Pl%02x%06x%02x%06x%s'
-			\ , fg['cterm']
-			\ , fg['gui']
-			\ , bg['cterm']
-			\ , bg['gui']
+		" Create a short and unique highlighting group name
+		" It uses the hex values of all the color properties and an attribute flag at the end
+		" NONE colors are translated to NN for cterm and NNNNNN for gui colors
+		let hi_group = printf('Pl%s%s%s%s%s'
+			\ , (fg['cterm'] == 'NONE' ? 'NN'     : printf('%02x', fg['cterm']))
+			\ , (fg['gui']   == 'NONE' ? 'NNNNNN' : printf('%06x', fg['gui']  ))
+			\ , (bg['cterm'] == 'NONE' ? 'NN'     : printf('%02x', bg['cterm']))
+			\ , (bg['gui']   == 'NONE' ? 'NNNNNN' : printf('%06x', bg['gui']  ))
 			\ , substitute(attr, '\v([a-zA-Z])[a-zA-Z]*,?', '\1', 'g')
 			\ )
 
 		if ! s:HlExists(hi_group) || ! has_key(s:hi_groups, hi_group)
 			" Create the highlighting group
-			let hi_cmd = printf('hi %s ctermfg=%03d ctermbg=%03d cterm=%s guifg=#%06x guibg=#%06x gui=%s'
+			let hi_cmd = printf('hi %s ctermfg=%s ctermbg=%s cterm=%s guifg=%s guibg=%s gui=%s'
 				\ , hi_group
-				\ , fg['cterm']
-				\ , bg['cterm']
+				\ , (fg['cterm'] == 'NONE' ? 'NONE' : printf('%d', fg['cterm']))
+				\ , (bg['cterm'] == 'NONE' ? 'NONE' : printf('%d', bg['cterm']))
 				\ , attr
-				\ , fg['gui']
-				\ , bg['gui']
+				\ , (fg['gui'] == 'NONE' ? 'NONE' : printf('#%06x', fg['gui']))
+				\ , (bg['gui'] == 'NONE' ? 'NONE' : printf('#%06x', bg['gui']))
 				\ , attr
 				\ )
 
@@ -428,15 +454,29 @@
 		if filereadable(g:Powerline_cache_file)
 			exec 'source' escape(g:Powerline_cache_file, ' \')
 
+			if ! exists('g:Powerline_cache_revision') || g:Powerline_cache_revision != s:CACHE_REVISION
+				" Cache revision differs, force statusline reloading
+				unlet! g:Powerline_cache_revision
+				     \ g:Powerline_match_statuslines
+				     \ g:Powerline_stored_statuslines
+				     \ g:Powerline_hi_cmds
+
+				return 0
+			endif
+
 			" Create highlighting groups
 			for hi_cmd in g:Powerline_hi_cmds
 				exec hi_cmd
 			endfor
 
 			" Assign statuslines
-			let s:statuslines = g:Powerline_statuslines
+			let s:match_statuslines  = g:Powerline_match_statuslines
+			let s:stored_statuslines = g:Powerline_stored_statuslines
 
-			unlet g:Powerline_statuslines g:Powerline_hi_cmds
+			unlet! g:Powerline_cache_revision
+			     \ g:Powerline_match_statuslines
+			     \ g:Powerline_stored_statuslines
+			     \ g:Powerline_hi_cmds
 
 			return 1
 		endif
@@ -465,8 +505,10 @@
 
 			" Prepare colors and statuslines for caching
 			let cache = [
+				\ 'let g:Powerline_cache_revision = '. string(s:CACHE_REVISION),
 				\ 'let g:Powerline_hi_cmds = '. string(s:hi_cmds),
-				\ 'let g:Powerline_statuslines = '. string(s:statuslines)
+				\ 'let g:Powerline_match_statuslines  = '. string(s:match_statuslines),
+				\ 'let g:Powerline_stored_statuslines = '. string(s:stored_statuslines)
 			\ ]
 
 			if empty(g:Powerline_cache_file)
@@ -493,13 +535,16 @@
 
 		return a:statuslines[statusline_mode]
 	endfunction " }}}
+	function! Pl#GetStoredStatusline(key) " {{{
+		return s:stored_statuslines[a:key]
+	endfunction " }}}
 	function! Pl#UpdateStatusline(current) " {{{
-		if empty(s:statuslines)
+		if empty(s:match_statuslines)
 			" Load statuslines if they aren't loaded yet
 			call Pl#Load()
 		endif
 
-		for statusline in s:statuslines
+		for statusline in s:match_statuslines
 			let valid = 1
 
 			" Validate matches
